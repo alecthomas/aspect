@@ -1,3 +1,4 @@
+import functools
 import sys
 import types
 
@@ -5,11 +6,24 @@ import types
 def advise(*join_points):
     """Hook advice to a function or method.
 
+    advise() is a decorator that takes a set of functions or methods and
+    injects the decorated function in their place. The decorated function should
+    have the signature:
+
+        @advise(some_function, Class.some_method, Class.some_class_method,
+                Class.some_static_method, ...)
+        def interceptor(on, next, *args, **kwargs):
+            ...
+
+    Where "on" is the object that hosts the intercepted function (ie. a module,
+    class or instance) and "next" is the next function in the interception
+    chain.
+
     >>> def eat(lunch):
     ...   print 'eating', lunch
 
     >>> @advise(eat)
-    ... def replace_sandwich(next, lunch):
+    ... def replace_sandwich(on, next, lunch):
     ...   if lunch == 'sandwich':
     ...     print 'delicious sandwich!'
     ...     return next('dirt')
@@ -33,11 +47,11 @@ def advise(*join_points):
     ...   def eat_static():
     ...     print 'mmm, static cling'
 
-    Multiple functions can be advised at the same time, including classmethods
-    and staticmethods:
+    Multiple functions can be intercepted in one call to @advise, including
+    classmethods and staticmethods:
 
     >>> @advise(Eater.eat, Eater.eat_class, Eater.eat_static)
-    ... def delicious(next):
+    ... def delicious(on, next):
     ...   print 'delicious!'
     ...   return next()
 
@@ -58,26 +72,41 @@ def advise(*join_points):
     >>> Eater.eat_static()
     delicious!
     mmm, static cling
+
+    Functions can be intercepted multiple times:
+
+    >>> @advise(Eater.eat)
+    ... def intercept(on, next):
+    ...   print 'intercepted...AGAIN'
+    ...   return next()
+
+    >>> Eater().eat()
+    intercepted...AGAIN
+    delicious!
+    tastes like identity!
     """
     hook = []
     def hook_advice(join_point):
-        def wrapper(*args, **kwargs):
+        def intercept(*args, **kwargs):
             return hook[0](on, join_point, *args, **kwargs)
+        intercept = functools.update_wrapper(intercept, join_point)
 
-        # Either a normal method or a class method
+        # Either a normal method or a class method?
         if type(join_point) is types.MethodType:
             # Class method
             if join_point.im_self:
                 on = join_point.im_self
-                @classmethod
-                def wrapper(cls, *args, **kwargs):
+                def intercept(cls, *args, **kwargs):
                     return hook[0](cls, join_point, *args, **kwargs)
+                intercept = functools.update_wrapper(intercept, join_point)
+                intercept = classmethod(intercept)
             else:
                 # Normal method, curry "self"
-                def wrapper(self, *args, **kwargs):
+                def intercept(self, *args, **kwargs):
                     return hook[0](self,
                                    lambda *a, **kw: join_point(self, *a, **kw),
                                    *args, **kwargs)
+                intercept = functools.update_wrapper(intercept, join_point)
                 on = join_point.im_class
         else:
             # Static method or global function
@@ -86,19 +115,19 @@ def advise(*join_points):
             name = join_point.__name__
             # Global function
             if caller_globals.get(name) is join_point:
-                caller_globals[name] = wrapper
+                caller_globals[name] = intercept
             else:
                 # Probably a staticmethod, try to find the attached class
                 for on in caller_globals.values():
                     if getattr(on, name, None) is join_point:
-                        wrapper = staticmethod(wrapper)
+                        intercept = staticmethod(intercept)
                         break
                 else:
                     raise ValueError('%s is not a global scope function and '
                                      'could not be found in top-level classes'
                                      % name)
         name = join_point.__name__
-        setattr(on, name, wrapper)
+        setattr(on, name, intercept)
 
     for join_point in join_points:
         hook_advice(join_point)
