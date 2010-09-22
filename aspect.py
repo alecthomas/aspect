@@ -46,20 +46,30 @@ def advise(*join_points):
     ...   @staticmethod
     ...   def eat_static():
     ...     print 'mmm, static cling'
+    ...   def eat_instance(self):
+    ...     print 'a moment in time'
+
+    >>> eater = Eater()
 
     Multiple functions can be intercepted in one call to @advise, including
     classmethods and staticmethods:
 
-    >>> @advise(Eater.eat, Eater.eat_class, Eater.eat_static)
+    >>> @advise(Eater.eat, Eater.eat_class, Eater.eat_static, eater.eat_instance)
     ... def delicious(on, next):
     ...   print 'delicious!'
     ...   return next()
 
-    Normal method:
+    Normal method intercepted on the class:
 
     >>> Eater().eat()
     delicious!
     tastes like identity!
+
+    Normal method intercepted on the instance:
+
+    >>> eater.eat_instance()
+    delicious!
+    a moment in time
 
     Class method:
 
@@ -84,6 +94,7 @@ def advise(*join_points):
     intercepted...AGAIN
     delicious!
     tastes like identity!
+
     """
     hook = []
     def hook_advice(join_point):
@@ -93,19 +104,21 @@ def advise(*join_points):
 
         # Either a normal method or a class method?
         if type(join_point) is types.MethodType:
-            # Class method
+            # Class method intercept or instance intercept
             if join_point.im_self:
                 on = join_point.im_self
-                def intercept(cls, *args, **kwargs):
-                    return hook[0](cls, join_point, *args, **kwargs)
-                intercept = functools.update_wrapper(intercept, join_point)
-                intercept = classmethod(intercept)
+                # If we have hooked onto an instance method...
+                if type(on) is type:
+                    def intercept(cls, *args, **kwargs):
+                        return hook[0](cls, join_point, *args, **kwargs)
+                    intercept = functools.update_wrapper(intercept, join_point)
+                    intercept = classmethod(intercept)
             else:
-                # Normal method, curry "self"
+                # Normal method, we curry "self" to make "next" uniform
                 def intercept(self, *args, **kwargs):
-                    return hook[0](self,
-                                   lambda *a, **kw: join_point(self, *a, **kw),
-                                   *args, **kwargs)
+                    curry = functools.update_wrapper(
+                        lambda *a, **kw: join_point(self, *a, **kw), join_point)
+                    return hook[0](self, curry, *args, **kwargs)
                 intercept = functools.update_wrapper(intercept, join_point)
                 on = join_point.im_class
         else:
