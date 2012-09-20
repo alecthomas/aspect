@@ -3,6 +3,9 @@ import sys
 import types
 
 
+__version__ = '0.0.1'
+
+
 def advise(*join_points):
     """Hook advice to a function or method.
 
@@ -97,6 +100,7 @@ def advise(*join_points):
 
     """
     hook = []
+
     def hook_advice(join_point):
         def intercept(*args, **kwargs):
             return hook[0](on, join_point, *args, **kwargs)
@@ -148,6 +152,7 @@ def advise(*join_points):
     def add_hook(func):
         hook.append(func)
         return func
+
     return add_hook
 
 

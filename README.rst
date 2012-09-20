@@ -17,3 +17,5 @@ The "classic" logging example::
   def logit(on, next, *args, **kwargs):
     logging.debug('%r.%r(%r, %r)', on, next, args, kwargs)
     return next(*args, **kwargs)
+
+See the function documentation for more information.
